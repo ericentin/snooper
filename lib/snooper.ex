@@ -1,5 +1,7 @@
 defmodule Snooper do
-  import Macro
+  @moduledoc """
+  This will be the documentation for Snooper eventually.
+  """
 
   require Logger
 
@@ -12,7 +14,7 @@ defmodule Snooper do
   end
 
   defp do_snoop(call, caller_module, blocks_args_fun) do
-    case decompose_call(call) do
+    case Macro.decompose_call(call) do
       :error ->
         raise_could_not_decompose(call)
 
@@ -151,7 +153,8 @@ defmodule Snooper do
       ) do
     item_string =
       try do
-        Code.format_string!(item_string, line_length: 80)
+        item_string
+        |> Code.format_string!(line_length: 80)
         |> IO.iodata_to_binary()
       catch
         kind, payload ->

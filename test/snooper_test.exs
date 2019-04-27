@@ -14,7 +14,8 @@ defmodule SnooperTest do
 
     snoop(def(test2, do: 2))
 
-    def test3 do
+    test3
+    |> def do
       2
     end
     |> snoop
