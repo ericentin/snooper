@@ -29,6 +29,7 @@ defmodule Snooper do
   defp snoop_blocks(call, decomposed, args, blocks_args_fun, caller_module) do
     {blocks, args} = blocks_args_fun.(args, call)
     blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
+
     to_snooped(decomposed, args, blocks)
   end
 
@@ -67,15 +68,16 @@ defmodule Snooper do
     signature = Macro.to_string(signature)
     formatted_mfa = "#{caller_module}.#{signature}"
     run_id_var = Macro.var(:run_id, __MODULE__)
-    node_block = hook_block(block, run_id_var)
     mfa_hash = :erlang.phash2(formatted_mfa)
 
     {block_name,
      quote do
        unquote(run_id_var) = "#{unquote(mfa_hash)}:#{System.unique_integer([:positive])}"
+
        put_enter_log(unquote(run_id_var), unquote(formatted_mfa), binding())
-       result = unquote(node_block)
+       result = unquote(hook_block(block, run_id_var))
        put_leave_log(unquote(run_id_var), result)
+
        result
      end}
   end
@@ -83,32 +85,23 @@ defmodule Snooper do
   defp hook_block(block, run_id_var) do
     {node_block, _line_max} =
       Macro.prewalk(block, 0, fn
-        {left, meta, _right} = item, line_max when is_list(meta) ->
+        {:->, _meta, _right} = item, line_max ->
+          {item, line_max}
+
+        {_left, meta, _right} = item, line_max ->
           line = Keyword.get(meta, :line, 0)
 
-          item_string = Macro.to_string(item)
+          if line > line_max do
+            {quote do
+               before_binding = binding()
+               run_id = unquote(run_id_var)
 
-          if line > line_max and left != :-> do
-            new_block =
-              quote do
-                before_binding = binding()
+               put_before_log(run_id, unquote(line), unquote(Macro.to_string(item)))
+               result = unquote(item)
+               put_after_log(run_id, unquote(line), before_binding, binding(), result)
 
-                put_before_log(unquote(run_id_var), unquote(line), unquote(item_string))
-
-                result = unquote(item)
-
-                put_after_log(
-                  unquote(run_id_var),
-                  unquote(line),
-                  before_binding,
-                  binding(),
-                  result
-                )
-
-                result
-              end
-
-            {new_block, line}
+               result
+             end, line}
           else
             {item, line_max}
           end
@@ -124,21 +117,21 @@ defmodule Snooper do
   def put_enter_log(run_id, formatted_mfa, caller_binding) do
     bound_args_info =
       if caller_binding != [] do
-        [", arg bindings: ", inspect(caller_binding, inspect_opts())]
-      else
-        ""
+        ", arg bindings: #{inspect(caller_binding, inspect_opts())}"
       end
 
-    IO.puts(
-      "[snoop_id:#{run_id}] Entered #{IO.ANSI.light_blue()}#{formatted_mfa}#{IO.ANSI.reset()}#{
-        bound_args_info
-      }"
+    write(
+      run_id,
+      "Entered #{IO.ANSI.light_blue()}#{formatted_mfa}#{IO.ANSI.reset()}#{bound_args_info}\n"
     )
   end
 
   @doc false
   def put_leave_log(run_id, caller_result) do
-    IO.puts("[snoop_id:#{run_id}] Returning: #{inspect(caller_result, inspect_opts())}")
+    write(
+      run_id,
+      "Returning: #{inspect(caller_result, inspect_opts())}\n"
+    )
   end
 
   @doc false
@@ -157,7 +150,7 @@ defmodule Snooper do
           Logger.warn(
             "Error during snoop id #{run_id} code formatting: #{
               Exception.format(kind, payload, __STACKTRACE__)
-            }\nUsing unformatted version instead."
+            }\nUsing unformatted version instead. Please report this issue."
           )
 
           item_string
@@ -173,11 +166,8 @@ defmodule Snooper do
         item_string
       end
 
-    item_string = [IO.ANSI.light_green(), item_string, IO.ANSI.reset()]
-
-    IO.write("""
-    [snoop_id:#{run_id}] Line #{line}: #{item_string}
-    """)
+    item_string = "#{IO.ANSI.light_green()}#{item_string}#{IO.ANSI.reset()}"
+    write(run_id, "Line #{line}: #{item_string}\n")
   end
 
   @doc false
@@ -216,16 +206,18 @@ defmodule Snooper do
       end
 
     if bindings_info != "" do
-      IO.write("""
-      [snoop_id:#{run_id}] Line #{line} evaluated to: #{inspect(result, inspect_opts())}#{
-        bindings_info
-      }
-      """)
+      write(
+        run_id,
+        "Line #{line} evaluated to: #{inspect(result, inspect_opts())}#{bindings_info}\n"
+      )
     end
   end
 
-  @doc false
-  def inspect_opts() do
+  defp write(run_id, content) do
+    IO.write(["[snoop_id:#{run_id}] ", content])
+  end
+
+  defp inspect_opts do
     [
       width: 80,
       pretty: true,
@@ -234,12 +226,12 @@ defmodule Snooper do
         number: :yellow,
         atom: :light_cyan,
         string: :green,
-        list: :blue,
+        list: :red,
         boolean: :magenta,
         nil: :magenta,
         tuple: :blue,
         binary: :green,
-        map: :blue
+        map: :light_blue
       ]
     ]
   end
