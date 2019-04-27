@@ -93,11 +93,7 @@ defmodule Snooper do
               quote do
                 before_binding = binding()
 
-                put_before_log(
-                  unquote(run_id_var),
-                  unquote(line),
-                  unquote(item_string)
-                )
+                put_before_log(unquote(run_id_var), unquote(line), unquote(item_string))
 
                 result = unquote(item)
 

@@ -3,7 +3,7 @@ defmodule SnooperTest do
   doctest Snooper
 
   import Snooper
-  import ExUnit.CaptureLog
+  import ExUnit.CaptureIO
 
   defmodule SnooperTestModule do
     snoop(
@@ -41,7 +41,7 @@ defmodule SnooperTest do
   end
 
   test "snoop doesn't interfere when it shouldn't" do
-    capture_log(fn ->
+    capture_io(fn ->
       assert SnooperTestModule.test1() == 2
       assert SnooperTestModule.test2() == 2
       assert SnooperTestModule.test3() == 2
@@ -94,7 +94,69 @@ defmodule SnooperTest do
   end
 
   test "snoop output looks nice" do
-    assert 10 == SnooperTestModule2.a_pointless_but_long_function("Hello Elixir")
+    assert capture_io(fn ->
+             assert 10 == SnooperTestModule2.a_pointless_but_long_function("Hello Elixir")
+           end)
+           |> String.split("\n")
+           |> Enum.map(&String.replace(&1, ~r/\[snoop_id:\d*:\d*\] /, "")) ==
+             [
+               "Entered \e[94mElixir.SnooperTest.SnooperTestModule2.a_pointless_but_long_function(my_other_string)\e[0m, arg bindings: \e[34m[\e[0m\e[96mmy_other_string:\e[0m \e[32m\"Hello Elixir\"\e[0m\e[34m]\e[0m",
+               "Line 75: \e[92msome_string = \"Hello World\"\e[0m",
+               "Line 75 evaluated to: \e[32m\"Hello World\"\e[0m, new bindings: \e[34m[\e[0m\e[96msome_string:\e[0m \e[32m\"Hello World\"\e[0m\e[34m]\e[0m",
+               "Line 76: \e[92msome_other_string = \"Hello Joe\"\e[0m",
+               "Line 76 evaluated to: \e[32m\"Hello Joe\"\e[0m, new bindings: \e[34m[\e[0m\e[96msome_other_string:\e[0m \e[32m\"Hello Joe\"\e[0m\e[34m]\e[0m",
+               "Line 78: \e[92m",
+               "  a_long_string =",
+               "    [some_string, some_other_string, my_other_string]",
+               "    |> Stream.cycle()",
+               "    |> Enum.take(10)",
+               "    |> Enum.join(\", \")\e[0m",
+               "Line 82: \e[92m",
+               "  [some_string, some_other_string, my_other_string]",
+               "  |> Stream.cycle()",
+               "  |> Enum.take(10)",
+               "  |> Enum.join(\", \")\e[0m",
+               "Line 78 evaluated to: \e[32m\"Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe, Hello Elixir, Hello World\"\e[0m, new bindings: \e[34m[\e[0m",
+               "  \e[96ma_long_string:\e[0m \e[32m\"Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe, Hello Elixir, Hello World\"\e[0m",
+               "\e[34m]\e[0m",
+               "Line 84: \e[92ma_long_string = String.replace(a_long_string, \"World\", \"Erlang\")\e[0m",
+               "Line 84 evaluated to: \e[32m\"Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang\"\e[0m, changed bindings: \e[34m[\e[0m",
+               "  \e[96ma_long_string:\e[0m \e[32m\"Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang\"\e[0m",
+               "\e[34m]\e[0m",
+               "Line 86: \e[92mmatches = Regex.scan(~r\"Hello\", a_long_string)\e[0m",
+               "Line 86 evaluated to: \e[34m[\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "  \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m",
+               "\e[34m]\e[0m, new bindings: \e[34m[\e[0m",
+               "  \e[96mmatches:\e[0m \e[34m[\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m\e[34m,\e[0m",
+               "    \e[34m[\e[0m\e[32m\"Hello\"\e[0m\e[34m]\e[0m",
+               "  \e[34m]\e[0m",
+               "\e[34m]\e[0m",
+               "Line 88: \e[92m",
+               "  unless(Enum.all?(matches, &([\"Hello\"] == &1))) do",
+               "    raise(\"match not for Hello\")",
+               "  end\e[0m",
+               "Line 92: \e[92mlength(matches)\e[0m",
+               "Returning: \e[33m10\e[0m",
+               ""
+             ]
   end
 
   defp snoop_fail(quoted, e \\ RuntimeError) do
