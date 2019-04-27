@@ -65,7 +65,20 @@ defmodule Snooper do
     signature = Macro.to_string(signature)
     formatted_mfa = "#{caller_module}.#{signature}"
     run_id_var = Macro.var(:run_id, __MODULE__)
+    node_block = hook_block(block, run_id_var)
+    mfa_hash = :erlang.phash2(formatted_mfa)
 
+    {block_name,
+     quote do
+       unquote(run_id_var) = "#{unquote(mfa_hash)}:#{System.unique_integer([:positive])}"
+       put_enter_log(unquote(run_id_var), unquote(formatted_mfa), binding())
+       result = unquote(node_block)
+       put_leave_log(unquote(run_id_var), result)
+       result
+     end}
+  end
+
+  defp hook_block(block, run_id_var) do
     {node_block, _line_max} =
       Macro.prewalk(block, 0, fn
         {_left, meta, _right} = item, line_max when is_list(meta) ->
@@ -105,25 +118,14 @@ defmodule Snooper do
           {other, line_max}
       end)
 
-    block =
-      quote do
-        unquote(run_id_var) =
-          "#{:erlang.phash2(unquote(formatted_mfa))}:#{System.unique_integer([:positive])}"
-
-        put_enter_log(unquote(run_id_var), unquote(formatted_mfa), binding())
-        result = unquote(node_block)
-        put_leave_log(unquote(run_id_var), result)
-        result
-      end
-
-    {block_name, block}
+    node_block
   end
 
   @doc false
   def put_enter_log(run_id, formatted_mfa, caller_binding) do
     bound_args_info =
       if caller_binding != [] do
-        [", arg bindings: ", inspect(caller_binding, IEx.Config.inspect_opts())]
+        [", arg bindings: ", inspect(caller_binding, inspect_opts())]
       else
         ""
       end
@@ -138,9 +140,7 @@ defmodule Snooper do
   @doc false
   def put_leave_log(run_id, caller_result) do
     IO.puts(
-      "[snoop_id:#{run_id}] Returning: #{inspect(caller_result, IEx.Config.inspect_opts())}#{
-        IO.ANSI.reset()
-      }"
+      "[snoop_id:#{run_id}] Returning: #{inspect(caller_result, inspect_opts())}#{IO.ANSI.reset()}"
     )
   end
 
@@ -194,7 +194,7 @@ defmodule Snooper do
 
     bindings_info =
       if new_bindings != [] do
-        ", new bindings: #{inspect(new_bindings, IEx.Config.inspect_opts())}"
+        ", new bindings: #{inspect(new_bindings, inspect_opts())}"
       else
         ""
       end
@@ -211,7 +211,7 @@ defmodule Snooper do
     bindings_info =
       if changed_bindings != [] do
         bindings_info <>
-          ", changed bindings: #{inspect(changed_bindings, IEx.Config.inspect_opts())}"
+          ", changed bindings: #{inspect(changed_bindings, inspect_opts())}"
       else
         bindings_info
       end
@@ -221,5 +221,24 @@ defmodule Snooper do
       [snoop_id:#{run_id}] After line #{line}#{bindings_info}#{IO.ANSI.reset()}
       """)
     end
+  end
+
+  @doc false
+  def inspect_opts() do
+    [
+      width: 80,
+      pretty: true,
+      syntax_colors: [
+        reset: [:reset, :yellow],
+        atom: :cyan,
+        string: :green,
+        list: :default_color,
+        boolean: :magenta,
+        nil: :magenta,
+        tuple: :default_color,
+        binary: :default_color,
+        map: :default_color
+      ]
+    ]
   end
 end
