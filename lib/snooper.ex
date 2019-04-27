@@ -81,12 +81,12 @@ defmodule Snooper do
   defp hook_block(block, run_id_var) do
     {node_block, _line_max} =
       Macro.prewalk(block, 0, fn
-        {_left, meta, _right} = item, line_max when is_list(meta) ->
+        {left, meta, _right} = item, line_max when is_list(meta) ->
           line = Keyword.get(meta, :line, 0)
 
           item_string = Macro.to_string(item)
 
-          if line > line_max do
+          if line > line_max and left != :-> do
             new_block =
               quote do
                 before_binding = binding()
@@ -103,7 +103,8 @@ defmodule Snooper do
                   unquote(run_id_var),
                   unquote(line),
                   before_binding,
-                  binding()
+                  binding(),
+                  result
                 )
 
                 result
@@ -133,15 +134,13 @@ defmodule Snooper do
     IO.puts(
       "[snoop_id:#{run_id}] Entered #{IO.ANSI.light_blue()}#{formatted_mfa}#{IO.ANSI.reset()}#{
         bound_args_info
-      }#{IO.ANSI.reset()}"
+      }"
     )
   end
 
   @doc false
   def put_leave_log(run_id, caller_result) do
-    IO.puts(
-      "[snoop_id:#{run_id}] Returning: #{inspect(caller_result, inspect_opts())}#{IO.ANSI.reset()}"
-    )
+    IO.puts("[snoop_id:#{run_id}] Returning: #{inspect(caller_result, inspect_opts())}")
   end
 
   @doc false
@@ -175,7 +174,7 @@ defmodule Snooper do
         item_string
       end
 
-    item_string = [IO.ANSI.yellow(), item_string, IO.ANSI.reset()]
+    item_string = [IO.ANSI.light_green(), item_string, IO.ANSI.reset()]
 
     IO.write("""
     [snoop_id:#{run_id}] Line #{line}: #{item_string}
@@ -187,7 +186,8 @@ defmodule Snooper do
         run_id,
         line,
         before_binding,
-        after_binding
+        after_binding,
+        result
       ) do
     new_keys = Keyword.keys(after_binding) -- Keyword.keys(before_binding)
     new_bindings = Keyword.take(after_binding, new_keys)
@@ -218,7 +218,9 @@ defmodule Snooper do
 
     if bindings_info != "" do
       IO.write("""
-      [snoop_id:#{run_id}] After line #{line}#{bindings_info}#{IO.ANSI.reset()}
+      [snoop_id:#{run_id}] Line #{line} evaluated to: #{inspect(result, inspect_opts())}#{
+        bindings_info
+      }
       """)
     end
   end
@@ -229,15 +231,16 @@ defmodule Snooper do
       width: 80,
       pretty: true,
       syntax_colors: [
-        reset: [:reset, :yellow],
-        atom: :cyan,
+        reset: :reset,
+        number: :yellow,
+        atom: :light_cyan,
         string: :green,
-        list: :default_color,
+        list: :blue,
         boolean: :magenta,
         nil: :magenta,
-        tuple: :default_color,
-        binary: :default_color,
-        map: :default_color
+        tuple: :blue,
+        binary: :green,
+        map: :blue
       ]
     ]
   end
