@@ -1,40 +1,33 @@
 defmodule Snooper do
   import Macro
 
+  require Logger
+
   defmacro snoop(call) do
-    caller_module = __CALLER__.module
-
-    case decompose_call(call) do
-      :error ->
-        raise_could_not_decompose(call)
-
-      {remote, function, args} ->
-        {blocks, args} = get_blocks(args, call)
-        blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
-        to_snooped({remote, function, args}, blocks)
-
-      {name, args} ->
-        {blocks, args} = get_blocks(args, call)
-        blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
-        to_snooped({name, args}, blocks)
-    end
+    do_snoop(call, __CALLER__.module, &get_blocks/2)
   end
 
   defmacro snoop(call, [{:do, _do_block} | _rest_blocks] = blocks) do
-    caller_module = __CALLER__.module
+    do_snoop(call, __CALLER__.module, fn args, _call -> {blocks, args} end)
+  end
 
+  defp do_snoop(call, caller_module, blocks_args_fun) do
     case decompose_call(call) do
       :error ->
         raise_could_not_decompose(call)
 
       {remote, function, args} ->
-        blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
-        to_snooped({remote, function, args}, blocks)
+        snoop_blocks(call, {remote, function}, args, blocks_args_fun, caller_module)
 
       {name, args} ->
-        blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
-        to_snooped({name, args}, blocks)
+        snoop_blocks(call, name, args, blocks_args_fun, caller_module)
     end
+  end
+
+  defp snoop_blocks(call, decomposed, args, blocks_args_fun, caller_module) do
+    {blocks, args} = blocks_args_fun.(args, call)
+    blocks = Enum.map(blocks, &to_snooped_block(&1, caller_module, args))
+    to_snooped(decomposed, args, blocks)
   end
 
   defmacro snoop(call, blocks) do
@@ -55,16 +48,14 @@ defmodule Snooper do
     end
   end
 
-  defp to_snooped({remote, function, args}, blocks) do
+  defp to_snooped({remote, function}, args, blocks) do
     quote do
-      require Logger
       unquote(remote).unquote(function)(unquote_splicing(args ++ [blocks]))
     end
   end
 
-  defp to_snooped({name, args}, blocks) do
+  defp to_snooped(name, args, blocks) do
     quote do
-      require Logger
       unquote(name)(unquote_splicing(args ++ [blocks]))
     end
   end
@@ -73,13 +64,7 @@ defmodule Snooper do
     [{_name, _meta, _snooped_args} = signature | _rest_args] = args
     signature = Macro.to_string(signature)
     formatted_mfa = "#{caller_module}.#{signature}"
-
-    before_block =
-      quote bind_quoted: [formatted_mfa: formatted_mfa] do
-        Logger.debug(fn ->
-          "Entered function #{formatted_mfa} with bound args: #{inspect(binding())}."
-        end)
-      end
+    run_id_var = Macro.var(:run_id, __MODULE__)
 
     {node_block, _line_max} =
       Macro.prewalk(block, 0, fn
@@ -93,17 +78,20 @@ defmodule Snooper do
               quote do
                 before_binding = binding()
 
-                Logger.debug(fn ->
-                  inspect({:before, unquote(line), unquote(item_string), before_binding})
-                end)
+                put_before_log(
+                  unquote(run_id_var),
+                  unquote(line),
+                  unquote(item_string)
+                )
 
                 result = unquote(item)
 
-                Logger.debug(fn ->
-                  after_binding = binding()
-
-                  inspect({:after, unquote(line), after_binding, result})
-                end)
+                put_after_log(
+                  unquote(run_id_var),
+                  unquote(line),
+                  before_binding,
+                  binding()
+                )
 
                 result
               end
@@ -117,21 +105,121 @@ defmodule Snooper do
           {other, line_max}
       end)
 
-    after_block =
-      quote bind_quoted: [formatted_mfa: formatted_mfa] do
-        Logger.debug(fn ->
-          "Leaving function #{formatted_mfa}."
-        end)
-      end
-
     block =
       quote do
-        unquote(before_block)
+        unquote(run_id_var) =
+          "#{:erlang.phash2(unquote(formatted_mfa))}:#{System.unique_integer([:positive])}"
+
+        put_enter_log(unquote(run_id_var), unquote(formatted_mfa), binding())
         result = unquote(node_block)
-        unquote(after_block)
+        put_leave_log(unquote(run_id_var), result)
         result
       end
 
     {block_name, block}
+  end
+
+  @doc false
+  def put_enter_log(run_id, formatted_mfa, caller_binding) do
+    bound_args_info =
+      if caller_binding != [] do
+        [", arg bindings: ", inspect(caller_binding, IEx.Config.inspect_opts())]
+      else
+        ""
+      end
+
+    IO.puts(
+      "[snoop_id:#{run_id}] Entered #{IO.ANSI.light_blue()}#{formatted_mfa}#{IO.ANSI.reset()}#{
+        bound_args_info
+      }#{IO.ANSI.reset()}"
+    )
+  end
+
+  @doc false
+  def put_leave_log(run_id, caller_result) do
+    IO.puts(
+      "[snoop_id:#{run_id}] Returning: #{inspect(caller_result, IEx.Config.inspect_opts())}#{
+        IO.ANSI.reset()
+      }"
+    )
+  end
+
+  @doc false
+  def put_before_log(
+        run_id,
+        line,
+        item_string
+      ) do
+    item_string =
+      try do
+        Code.format_string!(item_string, line_length: 80)
+        |> IO.iodata_to_binary()
+      catch
+        kind, payload ->
+          Logger.warn(
+            "Error during snoop id #{run_id} code formatting: #{
+              Exception.format(kind, payload, __STACKTRACE__)
+            }\nUsing unformatted version instead."
+          )
+
+          item_string
+      else
+        item_string -> item_string
+      end
+
+    item_string =
+      if String.contains?(item_string, "\n") do
+        item_string = String.replace(item_string, "\n", "\n  ")
+        ["\n  ", item_string]
+      else
+        item_string
+      end
+
+    item_string = [IO.ANSI.yellow(), item_string, IO.ANSI.reset()]
+
+    IO.write("""
+    [snoop_id:#{run_id}] Line #{line}: #{item_string}
+    """)
+  end
+
+  @doc false
+  def put_after_log(
+        run_id,
+        line,
+        before_binding,
+        after_binding
+      ) do
+    new_keys = Keyword.keys(after_binding) -- Keyword.keys(before_binding)
+    new_bindings = Keyword.take(after_binding, new_keys)
+
+    bindings_info =
+      if new_bindings != [] do
+        ", new bindings: #{inspect(new_bindings, IEx.Config.inspect_opts())}"
+      else
+        ""
+      end
+
+    old_keys = Keyword.keys(after_binding) -- new_keys
+
+    changed_bindings =
+      old_keys
+      |> Enum.map(&{&1, Keyword.get(after_binding, &1)})
+      |> Enum.filter(fn {key, value} ->
+        Keyword.fetch!(before_binding, key) != value
+      end)
+
+    bindings_info =
+      if changed_bindings != [] do
+        bindings_info <>
+          ", changed bindings: #{inspect(changed_bindings, IEx.Config.inspect_opts())}"
+      else
+        bindings_info
+      end
+
+    if bindings_info != "" do
+      IO.write("""
+      [snoop_id:#{run_id}] After line #{line}#{bindings_info}#{IO.ANSI.reset()}
+      """)
+    end
   end
 end
