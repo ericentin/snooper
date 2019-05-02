@@ -1,14 +1,49 @@
 defmodule Snooper do
   @moduledoc """
-  This will be the documentation for Snooper eventually.
+  Easily debug, inspect, and log a function's behavior on a line-by-line basis.
+
+  Use like so:
+
+      defmodule SnooperDocTest do
+        import Snooper
+
+        snoop def a_long_function(my_other_string) do
+          some_string = "Hello World"
+          some_other_string = "Hello Joe"
+          string_stream = Stream.cycle([some_string, some_other_string, my_other_string])
+          a_long_string = Enum.join(Enum.take(string_stream, 5), ", ")
+          String.replace(a_long_string, "World", "Erlang")
+        end
+      end
+
+  Gives output like:
+
+  <pre>
+  iex&gt; SnooperDocTest.a_long_function(&quot;Hello Elixir&quot;)
+  [snoop:76849672:323] Entered <font color="#729FCF">Elixir.SnooperDocTest.a_long_function(my_other_string)</font>, arg bindings: <font color="#CC0000">[</font><font color="#34E2E2">my_other_string:</font> <font color="#4E9A06">&quot;Hello Elixir&quot;</font><font color="#CC0000">]</font>
+  [snoop:76849672:323] Line 7: <font color="#8AE234">some_string = &quot;Hello World&quot;</font>
+  [snoop:76849672:323] Line 7 evaluated to: <font color="#4E9A06">&quot;Hello World&quot;</font>, new bindings: <font color="#CC0000">[</font><font color="#34E2E2">some_string:</font> <font color="#4E9A06">&quot;Hello World&quot;</font><font color="#CC0000">]</font>
+  [snoop:76849672:323] Line 8: <font color="#8AE234">some_other_string = &quot;Hello Joe&quot;</font>
+  [snoop:76849672:323] Line 8 evaluated to: <font color="#4E9A06">&quot;Hello Joe&quot;</font>, new bindings: <font color="#CC0000">[</font><font color="#34E2E2">some_other_string:</font> <font color="#4E9A06">&quot;Hello Joe&quot;</font><font color="#CC0000">]</font>
+  [snoop:76849672:323] Line 9: <font color="#8AE234">string_stream = Stream.cycle([some_string, some_other_string, my_other_string])</font>
+  [snoop:76849672:323] Line 9 evaluated to: #Function&lt;65.126435914/2 in Stream.unfold/2&gt;, new bindings: <font color="#CC0000">[</font><font color="#34E2E2">string_stream:</font> #Function&lt;65.126435914/2 in Stream.unfold/2&gt;<font color="#CC0000">]</font>
+  [snoop:76849672:323] Line 10: <font color="#8AE234">a_long_string = Enum.join(Enum.take(string_stream, 5), &quot;, &quot;)</font>
+  [snoop:76849672:323] Line 10 evaluated to: <font color="#4E9A06">&quot;Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe&quot;</font>, new bindings: <font color="#CC0000">[</font><font color="#34E2E2">a_long_string:</font> <font color="#4E9A06">&quot;Hello World, Hello Joe, Hello Elixir, Hello World, Hello Joe&quot;</font><font color="#CC0000">]</font>
+  [snoop:76849672:323] Line 11: <font color="#8AE234">String.replace(a_long_string, &quot;World&quot;, &quot;Erlang&quot;)</font>
+  [snoop:76849672:323] Returning: <font color="#4E9A06">&quot;Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe&quot;</font>
+  <font color="#4E9A06">&quot;Hello Erlang, Hello Joe, Hello Elixir, Hello Erlang, Hello Joe&quot;</font>
+  </pre>
+
+  The snoop:a:b tags represent the function being snooped (a), and a given execution of it (b). a will always be the same for a given snooped function, but b will always be unique.
   """
 
   require Logger
 
-  defmacro snoop(call) do
-    do_snoop(call, __CALLER__.module, &get_blocks/2)
+  defmacro snoop(def) do
+    do_snoop(def, __CALLER__.module, &get_blocks/2)
   end
 
+  @doc false
   defmacro snoop(call, [{:do, _do_block} | _rest_blocks] = blocks) do
     do_snoop(call, __CALLER__.module, fn args, _call -> {blocks, args} end)
   end
@@ -117,7 +152,7 @@ defmodule Snooper do
   def put_enter_log(run_id, formatted_mfa, caller_binding) do
     bound_args_info =
       if caller_binding != [] do
-        ", arg bindings: #{inspect(caller_binding, inspect_opts())}"
+        ", arg bindings:\n#{inspect(caller_binding, inspect_opts())}"
       end
 
     write(
@@ -167,7 +202,7 @@ defmodule Snooper do
       end
 
     item_string = "#{IO.ANSI.light_green()}#{item_string}#{IO.ANSI.reset()}"
-    write(run_id, "Line #{line}: #{item_string}\n")
+    write(run_id, "Line #{line}:\n#{item_string}\n")
   end
 
   @doc false
@@ -183,7 +218,7 @@ defmodule Snooper do
 
     bindings_info =
       if new_bindings != [] do
-        ", new bindings: #{inspect(new_bindings, inspect_opts())}"
+        ", new bindings:\n#{inspect(new_bindings, inspect_opts())}"
       else
         ""
       end
@@ -200,7 +235,7 @@ defmodule Snooper do
     bindings_info =
       if changed_bindings != [] do
         bindings_info <>
-          ", changed bindings: #{inspect(changed_bindings, inspect_opts())}"
+          ", changed bindings:\n#{inspect(changed_bindings, inspect_opts())}"
       else
         bindings_info
       end
@@ -208,13 +243,13 @@ defmodule Snooper do
     if bindings_info != "" do
       write(
         run_id,
-        "Line #{line} evaluated to: #{inspect(result, inspect_opts())}#{bindings_info}\n"
+        "Line #{line} evaluated to:\n#{inspect(result, inspect_opts())}#{bindings_info}\n"
       )
     end
   end
 
   defp write(run_id, content) do
-    IO.write(["[snoop_id:#{run_id}] ", content])
+    IO.write(["[snoop:#{run_id}] ", content])
   end
 
   defp inspect_opts do

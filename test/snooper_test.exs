@@ -107,7 +107,7 @@ defmodule SnooperTest do
              assert 10 == SnooperTestModule2.a_pointless_but_long_function("Hello Elixir")
            end)
            |> String.split("\n")
-           |> Enum.map(&String.replace(&1, ~r/\[snoop_id:\d*:\d*\] /, "")) ==
+           |> Enum.map(&String.replace(&1, ~r/\[snoop:128691739:\d*\] /, "")) ==
              [
                "Entered \e[94mElixir.SnooperTest.SnooperTestModule2.a_pointless_but_long_function(my_other_string)\e[0m, arg bindings: \e[31m[\e[0m\e[96mmy_other_string:\e[0m \e[32m\"Hello Elixir\"\e[0m\e[31m]\e[0m",
                "Line 10: \e[92msome_string = \"Hello World\"\e[0m",
